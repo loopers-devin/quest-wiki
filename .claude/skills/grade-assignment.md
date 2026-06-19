@@ -134,94 +134,120 @@ $CMUX agent-browser <surface> wait --text "종합 피드백" --timeout-ms 5000
 
 ---
 
-### Step 6: 기존 피드백 읽기
+### Step 6: 기존 피드백 읽기 + **즉시 백업** (필수 가드)
+
+> ⚠️ **이 단계를 건너뛰면 절대 Step 7로 진행하지 않는다.** 과거에 이 단계 누락으로 멘토 피드백이 영구 손실된 사고가 있었음.
+
+#### 6-1. 기존 textarea 값 읽기
 
 ```bash
-$CMUX agent-browser <surface> eval "document.querySelector('textarea').value"
+ORIGINAL=$($CMUX agent-browser <surface> eval "document.querySelector('textarea')?.value ?? ''")
 ```
+
+#### 6-2. **타임스탬프 백업 파일에 즉시 저장**
+
+```bash
+BACKUP_DIR="$HOME/.claude/projects/-Users-devin-loopers-devin-quest/grading-backups"
+mkdir -p "$BACKUP_DIR"
+TS=$(date +%Y%m%d-%H%M%S)
+BACKUP_FILE="$BACKUP_DIR/week${WEEK}_${STUDENT_NAME}_${TS}.txt"
+printf '%s' "$ORIGINAL" > "$BACKUP_FILE"
+# 검증: 백업 파일이 실제로 생성되었는지 확인
+if [ ! -f "$BACKUP_FILE" ]; then
+  echo "FATAL: 백업 생성 실패 — 채점 중단"
+  exit 1
+fi
+echo "✅ 백업 저장: $BACKUP_FILE ($(wc -c < "$BACKUP_FILE")자)"
+```
+
+> **규칙**:
+> - 백업 파일이 디스크에 존재함을 확인하기 전에는 절대 Step 7으로 가지 않는다.
+> - 백업 경로를 결과 보고(Step 10)에 항상 포함한다.
+> - 같은 학생을 여러 번 채점해도 타임스탬프가 다르므로 누적 보관된다.
 
 ---
 
-### Step 7: 피드백 텍스트 업데이트
+### Step 7: 피드백 텍스트 업데이트 (append-only)
 
-**원칙: 기존 피드백 내용은 모두 보존하고, 🤖 평가 블록은 항상 텍스트 최하단에 위치한다.**
+> ⚠️ **절대 금지**: `fill`로 textarea를 통째 교체하는 행위.
+> **유일하게 허용되는 동작**: 원본 텍스트의 **마지막에만** `🤖` 평가 블록을 덧붙이는 것.
 
-#### 7-1. 기존 피드백 파싱
+#### 7-1. 새 🤖 블록 구성
 
-Step 6에서 읽은 텍스트를 두 부분으로 나눈다:
-- **사람 작성 영역**: 기존 텍스트에서 마지막 `🤖 구현 평가 결과:` 줄 이후의 모든 🤖 블록을 제외한 앞부분
-- **이전 🤖 블록**: 무시(덮어쓰기). 단, 사람이 🤖 사이에 추가 멘트를 끼워 넣은 경우는 보존하기 어려우므로 가능하면 🤖 블록은 항상 가장 마지막에 모여 있다고 가정한다.
+새로 추가할 평가 블록 (PASS/FAIL 케이스별):
 
-> 정규식 가이드: `/(?:\n+)?(?:---\s*\n)?(?:🤖[^\n]*\n?)+\s*$/` 에 매치되는 꼬리 부분을 잘라낸다.
-
-#### 7-2. 새 🤖 블록 구성
-
-**PASS / PASS (이상 없음)**
+**PASS / PASS**
 ```
----
 🤖 구현 평가 결과: PASS
 🤖 라이팅 평가 결과: PASS
 ```
 
 **구현 FAIL — 사유 함께 기록**
 ```
----
 🤖 구현 평가 결과: FAIL
    - ★ Repository Interface가 Domain Layer에 위치하지 않음 (A4)
    - ★ OrderService 단위 테스트 누락 (O4)
 🤖 라이팅 평가 결과: PASS
 ```
 
-**라이팅 FAIL**
+**둘 다 FAIL**
 ```
----
-🤖 구현 평가 결과: PASS
+🤖 구현 평가 결과: FAIL
+   - ★ 도메인 모델링 없음 (P1, L1, O1)
 🤖 라이팅 평가 결과: FAIL
    - 블로그 링크 미제출
 ```
 
-**둘 다 FAIL**
-```
----
-🤖 구현 평가 결과: FAIL
-   - ★ 도메인 모델링 없음 (P1, L1, O1)
-   - ★ 단위 테스트 전무
-🤖 라이팅 평가 결과: FAIL
-   - 링크 접근 불가 (404)
-```
-
 > **사유 작성 규칙**
-> - FAIL일 때만 `   - ` 들여쓰기로 사유를 한 줄씩 나열한다.
-> - 가능하면 위키에서 어긴 항목 코드(`★ A4`, `O4` 등)를 함께 표기해 추적 가능하게 한다.
-> - 1~3줄 이내로 간결하게. 장문 분석은 Step 10 결과 보고에만 담는다.
-> - PASS인 항목은 사유를 적지 않는다.
+> - FAIL일 때만 `   - ` 들여쓰기로 사유 1~3줄.
+> - 가능하면 위키 항목 코드(`★ A4`, `O4` 등)와 함께.
+> - PASS 항목엔 사유 없음.
 
-#### 7-3. 최종 텍스트 = 사람 영역 + 빈 줄 + 새 🤖 블록
+#### 7-2. 최종 텍스트 = **원본 그대로 + 구분선 + 새 🤖 블록**
 
 ```
-<기존 사람 작성 피드백 그대로>
+<원본 텍스트 그대로 — 한 글자도 수정 금지>
 
 ---
 🤖 구현 평가 결과: ...
 🤖 라이팅 평가 결과: ...
 ```
 
-기존 사람 영역이 비어있으면 구분선(`---`)도 생략하고 🤖 블록만 쓴다.
+- 원본 끝에 이미 이전 🤖 블록이 있어도 **건드리지 않고** 그 뒤에 새 블록을 추가한다. 누적되는 한이 있어도 손실 위험은 피한다.
+- 원본이 완전히 비어있는 경우에만 구분선(`---`) 없이 🤖 블록만 입력한다.
 
-#### 7-4. 입력
+#### 7-3. 입력 (백업 확인 후에만 실행)
 
 ```bash
-$CMUX agent-browser <surface> snapshot --interactive
-# textbox ref 확인 (보통 e56 근처)
-$CMUX agent-browser <surface> fill <textbox-ref> "<최종 텍스트>"
+# 백업 파일 존재 재확인 — 없으면 중단
+[ -f "$BACKUP_FILE" ] || { echo "FATAL: 백업 없음"; exit 1; }
+
+# 원본을 변수에 다시 로드 (혹시 페이지가 다른 학생으로 바뀌었을 가능성 차단)
+CURRENT=$($CMUX agent-browser <surface> eval "document.querySelector('textarea')?.value ?? ''")
+if [ "$CURRENT" != "$ORIGINAL" ]; then
+  echo "FATAL: 페이지 textarea가 백업 시점과 달라짐 — 채점 중단"
+  exit 1
+fi
+
+# 최종 텍스트 = 원본 + (원본 비어있지 않으면) "\n\n---\n" + 새 🤖 블록
+if [ -n "$ORIGINAL" ]; then
+  FINAL="${ORIGINAL}
+
+---
+${ROBOT_BLOCK}"
+else
+  FINAL="${ROBOT_BLOCK}"
+fi
+
+# fill로 입력 (이때 FINAL은 원본을 100% 포함하므로 손실 없음)
+$CMUX agent-browser <surface> fill "textarea" "$FINAL"
 ```
 
-또는 CSS selector로:
-```bash
-$CMUX agent-browser <surface> fill "textarea" "<최종 텍스트>"
-```
-
-> ⚠️ `fill`은 기존 값을 덮어쓰므로 반드시 Step 7-3의 **최종 텍스트 전체**를 넘긴다. 부분만 넘기면 사람 작성 영역이 사라진다.
+> ⚠️ **재발 방지 체크리스트** (코드 작성 시 매번 확인):
+> 1. 백업 파일이 디스크에 실제로 만들어졌는가?
+> 2. `FINAL` 변수에 `$ORIGINAL`이 prefix로 들어가 있는가?
+> 3. 페이지가 백업 시점과 같은 학생인가?
+> 위 셋 중 하나라도 아니면 절대 fill 호출하지 않는다.
 
 ---
 
