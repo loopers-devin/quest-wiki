@@ -227,22 +227,86 @@ $CMUX agent-browser <surface> fill "textarea" "<최종 텍스트>"
 
 ### Step 8: 토글 설정
 
-**Rising Talent(RT) 토글은 건드리지 않는다.** RT는 사람이 직접 판단한다.
+> **평가 항목 영역에는 총 4개의 토글이 있다. 이 중 "통과" 2개만 다루고, "라이징 탤런트(RT)" 2개는 절대 건드리지 않는다.**
 
-통과 여부 토글만 설정한다:
+| # | 라벨 | 다루는가? | 동작 |
+|---|------|---------|------|
+| 1 | 구현 과제 통과 | ✅ | 구현 PASS면 ON, FAIL이면 OFF로 맞춘다 |
+| 2 | 구현 과제 라이징 탤런트 | ❌ | **건드리지 않음** (사람이 판단) |
+| 3 | 라이팅 과제 통과 | ✅ | 라이팅 PASS면 ON, FAIL이면 OFF로 맞춘다 |
+| 4 | 라이팅 과제 라이징 탤런트 | ❌ | **건드리지 않음** (사람이 판단) |
 
-| ID | 항목 | 조건 |
-|----|------|------|
-| `#assignment-pass` | 구현 과제 통과 | 구현 PASS → true |
-| `#wil-pass` | 라이팅 과제 통과 | 라이팅 PASS → true |
+#### 8-1. 라벨 기반으로 토글 식별
+
+ID가 빌드마다 바뀔 수 있으므로 **DOM 텍스트 라벨로 토글을 찾는다**. RT 토글을 잘못 클릭하지 않도록 라벨에 "라이징"이 포함되면 즉시 제외한다.
 
 ```bash
-# 현재 상태 확인
-$CMUX agent-browser <surface> eval "JSON.stringify(Array.from(document.querySelectorAll('[role=\"switch\"]')).map(s => ({id: s.id, checked: s.getAttribute('aria-checked')})))"
+$CMUX agent-browser <surface> eval "
+JSON.stringify(
+  Array.from(document.querySelectorAll('[role=\"switch\"]')).map(sw => {
+    // 가장 가까운 라벨 텍스트를 찾는다 (label, 인접 텍스트, aria-label 순)
+    const label =
+      sw.closest('label')?.textContent?.trim() ||
+      sw.parentElement?.textContent?.trim() ||
+      sw.getAttribute('aria-label') ||
+      '';
+    return {
+      id: sw.id || null,
+      label,
+      checked: sw.getAttribute('aria-checked') === 'true',
+      isRT: label.includes('라이징'),
+      kind: label.includes('구현') ? 'impl' : label.includes('라이팅') ? 'wil' : 'unknown',
+    };
+  })
+)
+"
+```
 
-# 결과에 따라 통과 토글만 클릭 (RT 토글은 무시)
-$CMUX agent-browser <surface> click "#assignment-pass"   # 필요시만
-$CMUX agent-browser <surface> click "#wil-pass"          # 필요시만
+기대 결과:
+```json
+[
+  {"id":"...","label":"구현 과제 통과","checked":false,"isRT":false,"kind":"impl"},
+  {"id":"...","label":"구현 과제 라이징 탤런트","checked":false,"isRT":true,"kind":"impl"},
+  {"id":"...","label":"라이팅 과제 통과","checked":false,"isRT":false,"kind":"wil"},
+  {"id":"...","label":"라이팅 과제 라이징 탤런트","checked":false,"isRT":true,"kind":"wil"}
+]
+```
+
+#### 8-2. 대상 토글 결정
+
+- `isRT === true` 인 토글은 **즉시 제외**. 어떤 경우에도 클릭하지 않는다.
+- `kind === 'impl' && !isRT` → 구현 통과 토글 (목표 상태 = 구현 PASS 여부)
+- `kind === 'wil' && !isRT` → 라이팅 통과 토글 (목표 상태 = 라이팅 PASS 여부)
+- 현재 `checked`와 목표 상태가 **다를 때만** 클릭한다.
+
+#### 8-3. 클릭
+
+`id`가 있으면 ID로, 없으면 라벨 텍스트로 클릭한다.
+
+```bash
+# ID가 있을 때 (안전한 selector)
+$CMUX agent-browser <surface> click "#<해당 토글 id>"
+
+# ID가 없을 때 — label 텍스트 기반 click
+$CMUX agent-browser <surface> click "text=구현 과제 통과 >> [role=switch]"
+$CMUX agent-browser <surface> click "text=라이팅 과제 통과 >> [role=switch]"
+```
+
+> ⚠️ **절대로 "라이징 탤런트"가 포함된 라벨의 토글을 selector로 잡지 않는다.** 디버깅 중에도 RT 토글은 그대로 둔다.
+
+#### 8-4. 검증
+
+토글 클릭 후 다시 한 번 상태를 읽어 목표와 일치하는지 확인한다.
+
+```bash
+$CMUX agent-browser <surface> eval "
+Array.from(document.querySelectorAll('[role=\"switch\"]'))
+  .filter(sw => !(sw.closest('label')?.textContent || sw.parentElement?.textContent || '').includes('라이징'))
+  .map(sw => ({
+    label: (sw.closest('label')?.textContent || sw.parentElement?.textContent || '').trim(),
+    checked: sw.getAttribute('aria-checked')
+  }))
+"
 ```
 
 ---
