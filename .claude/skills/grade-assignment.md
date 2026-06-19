@@ -128,7 +128,7 @@ gh api /repos/<owner/repo>/contents --jq '.[].name'
 ```bash
 $CMUX agent-browser <surface> snapshot --interactive
 # "피드백 작성 및 수정하기" 버튼 ref 확인 (보통 e8~e30 사이)
-$CMUX --json browser <surface> click <btn-ref> --snapshot-after
+$CMUX --json agent-browser <surface> click <btn-ref> --snapshot-after
 $CMUX agent-browser <surface> wait --text "종합 피드백" --timeout-ms 5000
 ```
 
@@ -144,41 +144,84 @@ $CMUX agent-browser <surface> eval "document.querySelector('textarea').value"
 
 ### Step 7: 피드백 텍스트 업데이트
 
-기존 텍스트에서 `🤖` 결과 줄이 있으면 해당 줄을 교체하고, 없으면 맨 끝에 추가한다.
+**원칙: 기존 피드백 내용은 모두 보존하고, 🤖 평가 블록은 항상 텍스트 최하단에 위치한다.**
 
-**새 결과 형식:**
+#### 7-1. 기존 피드백 파싱
+
+Step 6에서 읽은 텍스트를 두 부분으로 나눈다:
+- **사람 작성 영역**: 기존 텍스트에서 마지막 `🤖 구현 평가 결과:` 줄 이후의 모든 🤖 블록을 제외한 앞부분
+- **이전 🤖 블록**: 무시(덮어쓰기). 단, 사람이 🤖 사이에 추가 멘트를 끼워 넣은 경우는 보존하기 어려우므로 가능하면 🤖 블록은 항상 가장 마지막에 모여 있다고 가정한다.
+
+> 정규식 가이드: `/(?:\n+)?(?:---\s*\n)?(?:🤖[^\n]*\n?)+\s*$/` 에 매치되는 꼬리 부분을 잘라낸다.
+
+#### 7-2. 새 🤖 블록 구성
+
+**PASS / PASS (이상 없음)**
 ```
+---
 🤖 구현 평가 결과: PASS
 🤖 라이팅 평가 결과: PASS
 ```
 
-FAIL인 경우 `PASS` 대신 `FAIL`.
-
-기존 피드백이 있을 때:
+**구현 FAIL — 사유 함께 기록**
 ```
-<기존 내용>
-
-🤖 구현 평가 결과: PASS
+---
+🤖 구현 평가 결과: FAIL
+   - ★ Repository Interface가 Domain Layer에 위치하지 않음 (A4)
+   - ★ OrderService 단위 테스트 누락 (O4)
 🤖 라이팅 평가 결과: PASS
 ```
 
-기존 피드백이 없을 때:
+**라이팅 FAIL**
 ```
+---
 🤖 구현 평가 결과: PASS
-🤖 라이팅 평가 결과: PASS
+🤖 라이팅 평가 결과: FAIL
+   - 블로그 링크 미제출
 ```
 
-텍스트 구성 후 snapshot으로 textbox ref 확인하고 입력:
+**둘 다 FAIL**
+```
+---
+🤖 구현 평가 결과: FAIL
+   - ★ 도메인 모델링 없음 (P1, L1, O1)
+   - ★ 단위 테스트 전무
+🤖 라이팅 평가 결과: FAIL
+   - 링크 접근 불가 (404)
+```
+
+> **사유 작성 규칙**
+> - FAIL일 때만 `   - ` 들여쓰기로 사유를 한 줄씩 나열한다.
+> - 가능하면 위키에서 어긴 항목 코드(`★ A4`, `O4` 등)를 함께 표기해 추적 가능하게 한다.
+> - 1~3줄 이내로 간결하게. 장문 분석은 Step 10 결과 보고에만 담는다.
+> - PASS인 항목은 사유를 적지 않는다.
+
+#### 7-3. 최종 텍스트 = 사람 영역 + 빈 줄 + 새 🤖 블록
+
+```
+<기존 사람 작성 피드백 그대로>
+
+---
+🤖 구현 평가 결과: ...
+🤖 라이팅 평가 결과: ...
+```
+
+기존 사람 영역이 비어있으면 구분선(`---`)도 생략하고 🤖 블록만 쓴다.
+
+#### 7-4. 입력
+
 ```bash
 $CMUX agent-browser <surface> snapshot --interactive
 # textbox ref 확인 (보통 e56 근처)
-$CMUX agent-browser <surface> fill <textbox-ref> "<전체 텍스트>"
+$CMUX agent-browser <surface> fill <textbox-ref> "<최종 텍스트>"
 ```
 
 또는 CSS selector로:
 ```bash
-$CMUX agent-browser <surface> fill "textarea" "<전체 텍스트>"
+$CMUX agent-browser <surface> fill "textarea" "<최종 텍스트>"
 ```
+
+> ⚠️ `fill`은 기존 값을 덮어쓰므로 반드시 Step 7-3의 **최종 텍스트 전체**를 넘긴다. 부분만 넘기면 사람 작성 영역이 사라진다.
 
 ---
 
@@ -207,7 +250,7 @@ $CMUX agent-browser <surface> click "#wil-pass"          # 필요시만
 ### Step 9: 저장
 
 ```bash
-$CMUX --json browser <surface> click "저장" --snapshot-after
+$CMUX --json agent-browser <surface> click "저장" --snapshot-after
 # 또는 snapshot의 저장 버튼 ref
 $CMUX agent-browser <surface> wait --text "저장" --timeout-ms 5000
 ```
