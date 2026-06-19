@@ -16,7 +16,7 @@
 | [Week 2](week-02.md) | TBD | draft |
 | [Week 3](week-03.md) | 도메인 모델링 & 레이어드 아키텍처 | ready |
 | [Week 4](week-04.md) | 트랜잭션 · 동시성 제어 · 쿠폰 도메인 | ready |
-| [Week 5](week-05.md) | TBD | draft |
+| [Week 5](week-05.md) | 읽기 최적화 — Index · 비정규화 · 캐시 | ready |
 | [Week 6](week-06.md) | TBD | draft |
 | [Week 7](week-07.md) | TBD | draft |
 | [Week 8](week-08.md) | TBD | draft |
